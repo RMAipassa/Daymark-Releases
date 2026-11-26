@@ -1,0 +1,16 @@
+name: Prepare Daymark release
+
+on:
+  push:
+    branches: ['incoming/v*']
+
+permissions: {}
+
+jobs:
+  signal:
+    if: github.repository == 'RMAipassa/Daymark-Releases' && !github.event.deleted
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Signal the default-branch publisher
+        run: ':'

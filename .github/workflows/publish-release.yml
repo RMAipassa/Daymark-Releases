@@ -1,0 +1,73 @@
+name: Publish Daymark release
+
+on:
+  workflow_run:
+    workflows: [Prepare Daymark release]
+    types: [completed]
+    branches: ['incoming/v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Pending version (MAJOR.MINOR.PATCH, no leading v)'
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  verify:
+    if: >-
+      github.repository == 'RMAipassa/Daymark-Releases' && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.path == '.github/workflows/prepare-release.yml' &&
+      github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.verify.outputs.version }}
+      commit: ${{ steps.verify.outputs.commit }}
+      digest: ${{ steps.verify.outputs.digest }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android build tools
+        run: sdkmanager 'build-tools;35.0.0'
+      - name: Verify candidate tree, APK identity and signature
+        id: verify
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+          INCOMING_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          INCOMING_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: python3 -B scripts/publish.py verify
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    concurrency:
+      group: daymark-release-publisher
+      queue: max
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Publish immutable assets and advance the updater
+        env:
+          VERIFIED_VERSION: ${{ needs.verify.outputs.version }}
+          VERIFIED_COMMIT: ${{ needs.verify.outputs.commit }}
+          VERIFIED_DIGEST: ${{ needs.verify.outputs.digest }}
+          IMMUTABLE_SETTING_CONFIRMED: ${{ vars.DAYMARK_IMMUTABLE_RELEASES_ENABLED }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -B scripts/publish.py publish
